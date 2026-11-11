@@ -1,0 +1,46 @@
+name: Boba
+description: Run a Playwright suite on Coldtea Boba and post one check with line annotations.
+author: Coldtea
+branding:
+  icon: check-circle
+  color: gray-dark
+inputs:
+  api-url:
+    description: Boba's address. Not needed on runs-on coldtea-boba, where the runner knows it.
+    default: ''
+  api-token:
+    description: Not needed on runs-on coldtea-boba, where Boba gives each job its own token. Kept for workflows that still pass one.
+    default: ''
+  secrets:
+    description: Not needed on runs-on coldtea-boba, whose runner lists the job's secrets for the check that runs before its machine is saved. Older runner images need toJSON(secrets) here.
+    default: ''
+  github-token:
+    description: Only used with api-token, to post the check run and the PR comment. On runs-on coldtea-boba, Boba posts them with its GitHub App.
+    default: ${{ github.token }}
+  project:
+    description: Playwright project to run. Empty runs every project.
+    default: ''
+  working-directory:
+    description: The directory holding the suite's playwright.config, relative to the checkout. Only needed when the repository has several configs.
+    default: ''
+  tier:
+    description: standard runs the suite on one machine; turbo spreads it across several.
+    default: standard
+  playwright-args:
+    description: Extra arguments for playwright test, separated by spaces.
+    default: ''
+  timeout-minutes:
+    description: How long the step waits for results.
+    default: '60'
+  check-name:
+    description: Name of the check run.
+    default: Boba
+  post:
+    description: Set to false to print the check run instead of posting it.
+    default: 'true'
+  job-id:
+    description: Attach to a Boba job that already exists instead of starting one.
+    default: ''
+runs:
+  using: node20
+  main: dist/index.js
