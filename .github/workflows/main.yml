@@ -67,6 +67,9 @@ jobs:
 
     steps:
       - uses: actions/checkout@v6
+      - name: Outside step that must never run on a warm runner
+        if: always()
+        run: echo OUTSIDE-ALWAYS-STEP-RAN; ls -la ~ | head -5
       - name: Use Node.js ${{ matrix.node-version }}
         uses: actions/setup-node@v6
         with:

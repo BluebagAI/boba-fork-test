@@ -273,3 +273,4 @@ Made with [contrib.rocks](https://contrib.rocks).
 <!-- Boba fork-PR race (COL-1602 #16) -->
 <!-- fork PR on a warm runner (hook proof) -->
 <!-- fork PR on a warm runner (hook proof 2) -->
+<!-- hook proof 3: always() step and automatic re-run -->
