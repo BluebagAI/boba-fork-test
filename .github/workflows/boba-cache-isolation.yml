@@ -1,0 +1,42 @@
+name: Boba cache isolation
+
+on:
+  push:
+    branches: [cache-isolation]
+  pull_request:
+    branches: [cache-isolation]
+
+jobs:
+  isolation:
+    runs-on: coldtea-boba
+    steps:
+      - name: Who am I
+        run: echo "repo=$GITHUB_REPOSITORY event=$GITHUB_EVENT_NAME ref=$GITHUB_REF head_repo=${{ github.event.pull_request.head.repo.full_name }}"
+      - name: Restore the team's cache entry
+        id: restore
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          key: boba-isolation-v1
+          path: isolation-data
+      - name: Result
+        run: |
+          echo "cache-hit=${{ steps.restore.outputs.cache-hit }} matched=${{ steps.restore.outputs.cache-matched-key }}"
+          if [ -f isolation-data/owner.txt ]; then echo "restored content: $(cat isolation-data/owner.txt)"; else echo "nothing restored"; fi
+      - name: Read another repository's entry directly
+        if: vars.BOBA_FOREIGN_ENTRY != ''
+        env:
+          FOREIGN_ENTRY: ${{ vars.BOBA_FOREIGN_ENTRY }}
+        run: |
+          code=$(curl -s -o /dev/null -w '%{http_code}' -m 5 "http://172.16.0.1:7790/boba/entries/$FOREIGN_ENTRY" || true)
+          echo "GET foreign entry $FOREIGN_ENTRY -> HTTP $code"
+          claim=$(curl -s -o /dev/null -w '%{http_code}' -m 5 -X POST -d '{"repositoryId":1454392210,"outside":false,"ref":"refs/heads/cache-isolation","baseRef":null,"defaultBranch":"main"}' http://172.16.0.1:7790/claim || true)
+          echo "claim as repository 1454392210 -> HTTP $claim"
+      - name: Save the team's cache entry
+        if: github.event_name == 'push' && steps.restore.outputs.cache-hit != 'true' && github.repository == 'BluebagAI/boba-fork-test'
+        run: mkdir -p isolation-data && echo "BluebagAI/boba-fork-test team, $(date -u +%FT%TZ)" > isolation-data/owner.txt
+      - name: Save
+        if: github.event_name == 'push' && steps.restore.outputs.cache-hit != 'true' && github.repository == 'BluebagAI/boba-fork-test'
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          key: boba-isolation-v1
+          path: isolation-data
