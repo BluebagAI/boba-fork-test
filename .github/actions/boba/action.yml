@@ -7,40 +7,43 @@ branding:
 inputs:
   api-url:
     description: Boba's address. Not needed on runs-on coldtea-boba, where the runner knows it.
-    default: ''
+    default: ""
   api-token:
     description: Not needed on runs-on coldtea-boba, where Boba gives each job its own token. Kept for workflows that still pass one.
-    default: ''
+    default: ""
   secrets:
     description: Not needed on runs-on coldtea-boba, whose runner lists the job's secrets for the check that runs before its machine is saved. Older runner images need toJSON(secrets) here.
-    default: ''
+    default: ""
   github-token:
     description: Only used with api-token, to post the check run and the PR comment. On runs-on coldtea-boba, Boba posts them with its GitHub App.
     default: ${{ github.token }}
   project:
     description: Playwright project to run. Empty runs every project.
-    default: ''
+    default: ""
+  config:
+    description: The Playwright config file, relative to the checkout, when it isn't named playwright.config (what your workflow passes to playwright test -c).
+    default: ""
   working-directory:
     description: The directory holding the suite's playwright.config, relative to the checkout. Only needed when the repository has several configs.
-    default: ''
-  tier:
-    description: standard runs the suite on one machine; turbo spreads it across several.
-    default: standard
+    default: ""
+  turbo:
+    description: true spreads the suite across several machines; false runs it on one.
+    default: "false"
   playwright-args:
     description: Extra arguments for playwright test, separated by spaces.
-    default: ''
+    default: ""
   timeout-minutes:
     description: How long the step waits for results.
-    default: '60'
+    default: "60"
   check-name:
     description: Name of the check run.
     default: Boba
   post:
     description: Set to false to print the check run instead of posting it.
-    default: 'true'
+    default: "true"
   job-id:
     description: Attach to a Boba job that already exists instead of starting one.
-    default: ''
+    default: ""
 runs:
   using: node20
   main: dist/index.js
