@@ -273,3 +273,4 @@ Made with [contrib.rocks](https://contrib.rocks).
 <!-- COL-1641 proof step 1 -->
 <!-- proof COL-1641 step 1 repeat, fresh emulator -->
 <!-- proof COL-1641 step 4, code-only push to main -->
+<!-- repro: double seed on a services job, 1641 code -->
