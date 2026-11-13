@@ -14,6 +14,7 @@ on:
 jobs:
   ci:
     runs-on: coldtea-boba
+    environment: boba-proof
     strategy:
       matrix:
         node-version: [22]
