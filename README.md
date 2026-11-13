@@ -277,3 +277,7 @@ Made with [contrib.rocks](https://contrib.rocks).
 <!-- proof: one seed via a host task on a services job (1650) -->
 
 <!-- proof: a same-repo push boots from the team VM (COL-1618) -->
+
+Outside PR proof (COL-1618): first push.
+
+Outside PR proof (COL-1618): second push, warm from the outside VM.
