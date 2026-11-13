@@ -275,3 +275,5 @@ Made with [contrib.rocks](https://contrib.rocks).
 <!-- proof COL-1641 step 4, code-only push to main -->
 <!-- repro: double seed on a services job, 1641 code -->
 <!-- proof: one seed via a host task on a services job (1650) -->
+
+<!-- proof: a same-repo push boots from the team VM (COL-1618) -->
