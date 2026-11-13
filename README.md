@@ -271,5 +271,8 @@ Made with [contrib.rocks](https://contrib.rocks).
 [Apache 2.0 License](https://github.com/boxyhq/saas-starter-kit/blob/main/LICENSE)
 
 <!-- COL-1641 proof step 1 -->
+
+<!-- COL-1641 proof step 3 -->
+<!-- proof COL-1641 step 2 repeat on the PR branch -->
 <!-- proof COL-1641 step 1 repeat, fresh emulator -->
 <!-- proof COL-1641 step 4, code-only push to main -->
