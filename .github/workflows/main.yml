@@ -83,7 +83,6 @@ jobs:
       - run: npx prisma migrate deploy
       - name: Install playwright browser dependencies
         run: npx playwright install chromium
-      - run: echo "COL-1729 setup marker"
       - name: e2e tests
         uses: ./.github/actions/boba
       - uses: actions/upload-artifact@v7
