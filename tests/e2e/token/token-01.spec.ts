@@ -3,7 +3,10 @@ import { readFileSync } from 'node:fs';
 
 // Sends the session to the app, so the trace's requests carry it, and fails
 // its first try, so the trace is kept.
-test('prints the session it was given (01)', async ({ page, context }, testInfo) => {
+test('prints the session it was given (01)', async ({
+  page,
+  context,
+}, testInfo) => {
   const state = JSON.parse(
     readFileSync('playwright/.auth/boba-fake.json', 'utf8')
   );
