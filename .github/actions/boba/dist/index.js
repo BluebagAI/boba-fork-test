@@ -7421,6 +7421,20 @@ function infraError(result) {
   const message = result.errors?.[0]?.message ?? result.error?.message ?? "";
   return INFRA_ERRORS.some((pattern) => pattern.test(message));
 }
+var BROWSER_NOT_FOUND = /Executable doesn't exist at (?!\/opt\/pw-browsers\/)/;
+var PLAYWRIGHTS_DOWNLOAD = /ms-playwright\/|npx playwright install/;
+var BROWSERS_MISSING_HEADLINE = "Playwright's browsers aren't installed on the runner";
+var INSTALL_BROWSERS_STEP = "- run: npx playwright install --with-deps";
+function browsersMissing(outcomes) {
+  const failed = outcomes.filter((outcome) => outcome.status === "unexpected");
+  return failed.length > 0 && failed.every((outcome) => {
+    const message = clean(outcome.error?.message);
+    return BROWSER_NOT_FOUND.test(message) && PLAYWRIGHTS_DOWNLOAD.test(message);
+  });
+}
+function reportCause(input2) {
+  return input2.stopped === null && browsersMissing(input2.outcomes) ? "browsers_not_installed" : null;
+}
 var INERT_FILES = [
   /^\.boba-run$/,
   // The repository's own front-page prose, not a docs site's content.
@@ -7544,7 +7558,6 @@ function classify(outcomes, history) {
   const unexpected = outcomes.filter(
     (outcome) => outcome.status === "unexpected"
   );
-  const bobaOnly = (outcome) => outcome.failedAttempts > 0 && outcome.infraAttempts === outcome.failedAttempts;
   const failed = unexpected.filter((outcome) => !bobaOnly(outcome));
   const onMain = (outcome) => history.main?.tests[outcome.key] === "failed";
   const previously = new Set(history.previouslyFailing ?? []);
@@ -7704,9 +7717,13 @@ var STOP_WORDS = /* @__PURE__ */ new Set([
   "string",
   "waiting"
 ]);
+function bobaOnly(outcome) {
+  return outcome.failedAttempts > 0 && outcome.infraAttempts === outcome.failedAttempts;
+}
 function buildReport(input2) {
-  const body = reportBody(input2);
-  if (input2.stoppedEarly) {
+  const cause = reportCause(input2);
+  const body = cause ? browsersReport(input2) : reportBody(input2);
+  if (input2.stoppedEarly && !cause) {
     const [heading, ...rest] = body.markdown.split("\n");
     body.markdown = [
       heading.replace(/^### ✅/, "### \u23F9"),
@@ -7727,7 +7744,51 @@ ${body.markdown}`, COMMENT_LIMIT),
       title: body.title,
       summary: truncate(body.markdown, SUMMARY_LIMIT),
       conclusion: input2.generationMismatch ? "failure" : body.conclusion
-    }
+    },
+    cause,
+    bobaErrors: input2.outcomes.filter(
+      (outcome) => outcome.status === "unexpected" && bobaOnly(outcome)
+    ).length
+  };
+}
+function browsersReport(input2) {
+  const failed = input2.outcomes.filter(
+    (outcome) => outcome.status === "unexpected"
+  );
+  const error = clean(failed[0]?.error?.message).split("\n")[0];
+  const prompt = [
+    `The Playwright tests of ${input2.links.repository}${input2.links.pullRequest ? ` pull request #${input2.links.pullRequest}` : ""} at commit ${short(input2.sha)} never ran: Playwright's browsers aren't installed on the CI runner. The error:`,
+    "",
+    truncate(error, 1e3),
+    "",
+    `In the GitHub Actions workflow that runs Boba (under .github/workflows/), add this step before the Boba step:`,
+    "",
+    INSTALL_BROWSERS_STEP,
+    "",
+    "Keep it after the step that installs the project's dependencies, so it installs the browsers of the Playwright version the project uses."
+  ].join("\n");
+  const report = input2.links.reportUrl ? `[Full report](${input2.links.reportUrl})` : null;
+  return {
+    title: BROWSERS_MISSING_HEADLINE,
+    markdown: [
+      `### \u26A0\uFE0F ${BROWSERS_MISSING_HEADLINE}`,
+      "",
+      `${failed.length === 1 ? "1 test" : `All ${failed.length} tests that failed`} on ${short(input2.sha)} couldn't start a browser, so ${failed.length === 1 ? "it" : "they"} never ran. Add this step before the Boba step in your workflow, then re-run:`,
+      "",
+      fence(INSTALL_BROWSERS_STEP, "yaml"),
+      "",
+      fence(truncate(error, 1e3), ""),
+      "",
+      fold("\u{1F916} Prompt for AI agents", fence(prompt, "text")),
+      "",
+      [report, `[Full log](${input2.links.runUrl})`].filter(Boolean).join(" \xB7 "),
+      ...input2.generationMismatch ? [
+        "",
+        "> [!WARNING]",
+        "> These results come from an earlier commit's build, so the check fails until this commit's own run passes"
+      ] : []
+    ].join("\n"),
+    conclusion: "failure"
   };
 }
 function reportBody(input2) {
@@ -7810,21 +7871,23 @@ function reportBody(input2) {
     };
   }
   if (v.broken.length === 0) {
+    const nonePassed = passedTotal === 0;
+    const headline = nonePassed ? "No test passed" : `Nothing broken by this ${change(input2)}`;
     return {
-      title: `Nothing broken by this ${change(input2)}`,
+      title: headline,
       markdown: [
-        `### \u2705 Nothing broken by this ${change(input2)}`,
+        `### ${nonePassed ? "\u274C" : "\u2705"} ${headline}`,
         "",
         [`${v.counts.passed} passed`, skipped, report].filter(Boolean).join(" \xB7 "),
         "",
         ...v.failingOnMain.map(
-          (outcome) => `\u274C ${code(title(outcome))} fails on main too${since(input2.history, outcome)}, so it isn't blocking${traceLink(input2, outcome, " \xB7 ", "Open its trace")}`
+          (outcome) => `\u274C ${code(title(outcome))} fails on main too${since(input2.history, outcome)}${nonePassed ? "" : ", so it isn't blocking"}${traceLink(input2, outcome, " \xB7 ", "Open its trace")}`
         ),
         ...v.flaky.length ? ["", flakyFold(v, input2, null)] : [],
         ...outsideTests,
         ...mismatch
       ].join("\n"),
-      conclusion: input2.globalErrors.length ? "failure" : "neutral"
+      conclusion: nonePassed || input2.globalErrors.length ? "failure" : "neutral"
     };
   }
   const footer = [
@@ -8571,6 +8634,8 @@ var RETRY_MS = 2e3;
 var RETRY_LIMIT_MS = 5 * 6e4;
 var RETRY_AFTER_CAP_MS = 1e4;
 var ONCE_TIMEOUT_MS = 5e3;
+var READ_TIMEOUT_MS = 3e4;
+var ODD_ANSWER_LIMIT_MS = 6e4;
 var RETRIED_STATUSES = /* @__PURE__ */ new Set([429, 502, 503, 504]);
 var RETRIED_READ_STATUSES = /* @__PURE__ */ new Set([520, 521, 522, 523, 524]);
 var BobaApi = class {
@@ -8643,7 +8708,7 @@ var BobaApi = class {
       if (job.status === "done" || job.status === "failed")
         return { job, timedOut: false };
       if (Date.now() > deadline) {
-        await this.cancelJob(jobId).catch(
+        await this.cancelJob(jobId, "deadline").catch(
           (error) => console.log(
             `::warning::Boba job ${jobId} was not cancelled: ${error instanceof Error ? error.message : String(error)}`
           )
@@ -8653,10 +8718,12 @@ var BobaApi = class {
       await new Promise((resolve) => setTimeout(resolve, pollMs));
     }
   }
-  async cancelJob(jobId) {
+  /** `deadline`: the step's own time ran out, the customer's timeout; `error`: the step itself failed. */
+  async cancelJob(jobId, reason) {
     await this.call(
       "POST",
-      `/api/boba/jobs/${encodeURIComponent(jobId)}/cancel`
+      `/api/boba/jobs/${encodeURIComponent(jobId)}/cancel`,
+      JSON.stringify({ reason })
     );
   }
   /** The in-progress PR comment; it can never cover a later result, so nothing waits on it. */
@@ -8713,22 +8780,45 @@ var BobaApi = class {
     writeFileSync2(destination, Buffer.from(await response.arrayBuffer()));
   }
   async call(method, path, body, once) {
-    const response = await this.fetch(method, path, body, once);
-    const parsed = await response.json();
-    return parsed;
+    const giveUpAt = once ? 0 : Date.now() + RETRY_LIMIT_MS;
+    let oddSince = null;
+    for (; ; ) {
+      const response = await this.fetch(method, path, body, once, giveUpAt);
+      const text = await response.text().catch(() => null);
+      const parsed = text === null ? void 0 : parseJson(text);
+      const fromBoba = isRecord(parsed) && (response.ok || typeof parsed.type === "string");
+      if (method === "GET" && !once && !fromBoba && response.status !== 401 && response.status !== 403 && Date.now() - (oddSince ??= Date.now()) <= ODD_ANSWER_LIMIT_MS) {
+        console.log(
+          `Boba GET ${path} answered ${response.status} with no answer of Boba's; trying again`
+        );
+        await new Promise((resolve) => setTimeout(resolve, RETRY_MS));
+        continue;
+      }
+      if (!response.ok) {
+        const message = readMessage(parsed);
+        throw new Error(
+          message && (response.status === 401 || response.status === 403) ? `Boba refused this step: ${message}` : `Boba ${method} ${path} answered ${response.status}: ${(message ?? text ?? "").slice(0, 500)}`
+        );
+      }
+      if (parsed === void 0)
+        throw new Error(
+          `Boba ${method} ${path} answered ${response.status} with no JSON: ${(text ?? "").slice(0, 200)}`
+        );
+      return parsed;
+    }
   }
   /**
    * Rides out a deploy or restart of Boba: a gateway answer (502, 503, 504)
    * means the request never reached it, so any call is sent again, and a
-   * read is also sent again after a dropped connection or Cloudflare's 520
-   * to 524. A rate limit (429) is waited out the same way: the runners on
-   * one machine share an address.
+   * read is also sent again after a dropped connection, a read that took
+   * too long, or Cloudflare's 520 to 524. A rate limit (429) is waited out
+   * the same way: the runners on one machine share an address.
    */
-  async fetch(method, path, body, once) {
-    const giveUpAt = once ? 0 : Date.now() + RETRY_LIMIT_MS;
+  async fetch(method, path, body, once, giveUpAt) {
     let response;
     for (; ; ) {
       try {
+        const timeout = once ? AbortSignal.any([once, AbortSignal.timeout(ONCE_TIMEOUT_MS)]) : method === "GET" ? AbortSignal.timeout(READ_TIMEOUT_MS) : void 0;
         response = await fetch(`${this.baseUrl}${path}`, {
           method,
           headers: {
@@ -8736,20 +8826,18 @@ var BobaApi = class {
             ...body ? { "content-type": "application/json" } : {}
           },
           body,
-          ...once ? {
-            signal: AbortSignal.any([
-              once,
-              AbortSignal.timeout(ONCE_TIMEOUT_MS)
-            ])
-          } : {}
+          ...timeout ? { signal: timeout } : {}
         });
       } catch (error) {
         if (method !== "GET" || Date.now() > giveUpAt) throw error;
+        console.log(
+          `Boba GET ${path} failed (${error instanceof Error ? error.message : String(error)}); trying again`
+        );
         await new Promise((resolve) => setTimeout(resolve, RETRY_MS));
         continue;
       }
       const retried = RETRIED_STATUSES.has(response.status) || method === "GET" && RETRIED_READ_STATUSES.has(response.status);
-      if (!retried || Date.now() > giveUpAt) break;
+      if (!retried || Date.now() > giveUpAt) return response;
       const waitMs = retryAfterMs(response.headers.get("retry-after"));
       await response.body?.cancel();
       console.log(`Boba answered ${response.status}; trying again`);
@@ -8760,14 +8848,6 @@ var BobaApi = class {
         )
       );
     }
-    if (!response.ok) {
-      const text = await response.text();
-      const message = readMessage(text);
-      throw new Error(
-        message && (response.status === 401 || response.status === 403) ? `Boba refused this step: ${message}` : `Boba ${method} ${path} answered ${response.status}: ${(message ?? text).slice(0, 500)}`
-      );
-    }
-    return response;
   }
 };
 function retryAfterMs(header) {
@@ -8776,13 +8856,18 @@ function retryAfterMs(header) {
   const ms = Number.isFinite(seconds) ? seconds * 1e3 : Date.parse(header) - Date.now();
   return Number.isFinite(ms) ? ms : 0;
 }
-function readMessage(text) {
+function parseJson(text) {
   try {
-    const body = record(JSON.parse(text));
-    return typeof body.message === "string" ? body.message : null;
+    return JSON.parse(text);
   } catch {
-    return null;
+    return void 0;
   }
+}
+function isRecord(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function readMessage(body) {
+  return isRecord(body) && typeof body.message === "string" ? body.message : null;
 }
 function isStatus(value) {
   return value === "queued" || value === "running" || value === "done" || value === "failed";
@@ -9092,6 +9177,8 @@ async function main() {
       checkRun: requests,
       pullRequest,
       comment: pullRequest === null ? null : built.comment,
+      cause: built.cause,
+      bobaErrors: built.bobaErrors,
       // A run on another commit's build says nothing about this commit.
       history: ran && !job.generationMismatch ? historyRecord(outcomes) : null
     });
@@ -9163,7 +9250,7 @@ async function runSuites(run) {
   } catch (error) {
     stopHistory.abort();
     await Promise.all(
-      jobs.map((entry) => api.cancelJob(entry.jobId).catch(() => {
+      jobs.map((entry) => api.cancelJob(entry.jobId, "error").catch(() => {
       }))
     );
     throw error;
@@ -9285,10 +9372,14 @@ async function runSuites(run) {
         checkRun: requests,
         pullRequest,
         comment: pullRequest === null ? null : combined.comment,
+        cause: first.built.cause,
+        bobaErrors: first.built.bobaErrors,
         history: historyOf(first),
         suites: rest.map((result) => ({
           jobId: result.entry.jobId,
-          history: historyOf(result)
+          history: historyOf(result),
+          cause: result.built.cause,
+          bobaErrors: result.built.bobaErrors
         }))
       });
       console.log(`Check run: ${posted.checkRunUrl}`);
