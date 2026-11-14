@@ -7,5 +7,5 @@ test('prints the session it was given (07)', async ({ page }) => {
   );
   console.log(`session cookie: ${state.cookies[0].value}`);
   expect(state.cookies[0].value).toBeTruthy();
-  await page.waitForTimeout(18_000);
+  await page.waitForTimeout(60_000);
 });
