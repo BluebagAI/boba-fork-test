@@ -9,6 +9,7 @@ on:
       - col-1720-planted
       - col-1720-planted-b
       - col-1720-outside
+      - col-1720-local
       - release
   pull_request:
     branches:
