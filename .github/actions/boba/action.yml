@@ -32,6 +32,10 @@ inputs:
   playwright-args:
     description: Extra arguments for playwright test, separated by spaces.
     default: ""
+  suites:
+    description: |
+      Only for a job with more than one Playwright test step: those steps' runs, as a YAML list, so one Boba step runs them all at once and posts one check with a section each. Each item takes config, args and env (added to the step's environment), and an optional name. The step's own config and playwright-args run as one more suite. Leave it out for a job with one Playwright step.
+    default: ""
   fail-fast:
     description: On a pull request, true stops the run at its first test that fails after its retries, and the check says how many tests did not run; false runs the whole suite. Pushes and merge queues always run the whole suite.
     default: "true"
