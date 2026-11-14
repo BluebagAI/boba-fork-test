@@ -6,6 +6,7 @@ on:
   push:
     branches:
       - main
+      - col-1720-planted
       - release
   pull_request:
     branches:
@@ -85,6 +86,8 @@ jobs:
         run: npx playwright install chromium
       - name: e2e tests
         uses: ./.github/actions/boba
+        with:
+          turbo: true
       - uses: actions/upload-artifact@v7
         if: ${{ !cancelled() }}
         with:

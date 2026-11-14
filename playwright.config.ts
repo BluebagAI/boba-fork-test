@@ -13,11 +13,6 @@ const config: PlaywrightTestConfig = {
     {
       name: 'setup',
       testMatch: 'support/*.setup.ts',
-      teardown: 'cleanup db',
-    },
-    {
-      name: 'cleanup db',
-      testMatch: 'support/*.teardown.ts',
     },
     {
       name: 'chromium',
