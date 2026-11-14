@@ -7,6 +7,7 @@ on:
     branches:
       - main
       - col-1720-planted
+      - col-1720-planted-b
       - release
   pull_request:
     branches:
