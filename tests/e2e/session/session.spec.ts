@@ -92,3 +92,5 @@ test('On Remove session user logs out', async ({ browser }) => {
 
   await context.close();
 });
+
+// COL-1732 proof: a test-only change.
