@@ -12,7 +12,7 @@ setup('write a session storageState', async () => {
         {
           name: 'app_session',
           value: `bobafake1720x${randomBytes(12).toString('hex')}`,
-          domain: 'localhost',
+          domain: 'auth.example.com',
           path: '/',
         },
       ],
