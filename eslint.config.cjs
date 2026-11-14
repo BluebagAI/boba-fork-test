@@ -17,6 +17,7 @@ const compat = new FlatCompat({
 module.exports = [{
     ignores: [
         ".next",
+        ".github/actions",
         "**/node_modules",
         "eslint.config.cjs",
         "next-env.d.ts"
