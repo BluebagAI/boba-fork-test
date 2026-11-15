@@ -279,3 +279,4 @@ Made with [contrib.rocks](https://contrib.rocks).
 <!-- proof: a same-repo push boots from the team VM (COL-1618) -->
 
 Walkthrough: a new customer's first Boba run.
+Second push: warm run.
