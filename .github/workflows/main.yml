@@ -86,7 +86,7 @@ jobs:
       - name: e2e tests
         uses: ./.github/actions/boba
         with:
-          turbo: "true"
+          turbo: 'true'
       - uses: actions/upload-artifact@v7
         if: ${{ !cancelled() }}
         with:
