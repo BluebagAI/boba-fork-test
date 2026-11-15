@@ -7397,9 +7397,17 @@ var OPEN_FAILURE_LIMIT = 5;
 var GROUP_LIST_LIMIT = 50;
 var COMMENT_LIMIT = 65e3;
 var FIRST_RUN = "Boba set up your app on this first run. Later pushes will reuse that setup and start faster.";
+function maskedLine(count) {
+  return count === 1 ? "1 credential your setup signed in with is masked wherever the report shows it. It only opens this job's own app." : `${count} credentials your setup signed in with are masked wherever the report shows them. They only open this job's own app.`;
+}
 function stoppedEarlyLine(stopped) {
   return `Stopped after the first failure. ${stopped.notRun} of ${stopped.total} tests not run.`;
 }
+function historyUnreadLine(error) {
+  return `Boba could not read earlier results, so no failure is excused as also failing on main: ${error}`;
+}
+var HISTORY_LATE_LINE = "Earlier results were not back when the tests ended, so no failure is excused as also failing on main";
+var NAMES_WITHHELD_LINE = "Test names and errors are withheld: this run wrote values Boba could not check for your secrets, so none of its text is shown.";
 function timedOutLine(minutes) {
   return `Boba stopped this job at its ${minutes}-minute limit.`;
 }
@@ -7433,7 +7441,7 @@ function browsersMissing(outcomes) {
   });
 }
 function reportCause(input2) {
-  return input2.stopped === null && browsersMissing(input2.outcomes) ? "browsers_not_installed" : null;
+  return input2.stopped === null && !input2.bobaFault && browsersMissing(input2.outcomes) ? "browsers_not_installed" : null;
 }
 var INERT_FILES = [
   /^\.boba-run$/,
@@ -7794,16 +7802,22 @@ function browsersReport(input2) {
 function reportBody(input2) {
   const v = classify(input2.outcomes, input2.history);
   const ranTests = v.counts.passed + v.counts.failed + v.counts.flaky > 0;
-  const mismatch = input2.generationMismatch ? [
-    "",
-    "> [!WARNING]",
-    "> These results come from an earlier commit's build, so the check fails until this commit's own run passes"
-  ] : [];
+  const notes = [
+    ...input2.generationMismatch ? [
+      "",
+      "> [!WARNING]",
+      "> These results come from an earlier commit's build, so the check fails until this commit's own run passes"
+    ] : [],
+    ...input2.maskedValues ? ["", maskedLine(input2.maskedValues)] : [],
+    ...input2.namesWithheld ? ["", NAMES_WITHHELD_LINE] : [],
+    // Tests ran, but Boba already counts the run as its failure.
+    ...input2.bobaFault && input2.stopped === null && ranTests ? ["", BOBA_BROKE_RUN] : []
+  ];
   if (input2.stopped !== null || !ranTests) {
-    const text = couldntRun(input2);
+    const text = input2.bobaFault || couldNotStart(input2) ? bobaFailed(input2) : couldntRun(input2);
     return {
       title: text.title,
-      markdown: [...text.lines, ...mismatch].join("\n"),
+      markdown: [...text.lines, ...notes].join("\n"),
       conclusion: "failure"
     };
   }
@@ -7846,7 +7860,7 @@ function reportBody(input2) {
           "",
           "\u26A0\uFE0F Playwright exited with an error after the tests, so the check fails"
         ],
-        ...mismatch
+        ...notes
       ].join("\n"),
       conclusion: clean2 ? "success" : "failure"
     };
@@ -7865,7 +7879,7 @@ function reportBody(input2) {
         "",
         [report, duration].filter(Boolean).join(" \xB7 "),
         ...outsideTests,
-        ...mismatch
+        ...notes
       ].join("\n"),
       conclusion: "failure"
     };
@@ -7885,7 +7899,7 @@ function reportBody(input2) {
         ),
         ...v.flaky.length ? ["", flakyFold(v, input2, null)] : [],
         ...outsideTests,
-        ...mismatch
+        ...notes
       ].join("\n"),
       conclusion: nonePassed || input2.globalErrors.length ? "failure" : "neutral"
     };
@@ -7895,10 +7909,10 @@ function reportBody(input2) {
       v.flaky.length ? null : [`${v.counts.passed} passed`, skipped, duration].filter(Boolean).join(" \xB7 ")
     ]
   ].flat().filter(Boolean);
+  const brokeRun = input2.bobaFault || v.bobaErrors.length > 0;
   const tail = [
     ...lost,
-    "",
-    promptFold(v, input2),
+    ...brokeRun ? [] : ["", promptFold(v, input2)],
     "",
     [
       v.broken.length > 1 ? traceLinks(input2, v.broken) : traceLink(input2, v.broken[0], "", "Open the trace"),
@@ -7907,7 +7921,7 @@ function reportBody(input2) {
     "",
     v.flaky.length ? flakyFold(v, input2, [`${v.counts.passed} passed`, skipped, duration]) : footer.join(""),
     ...outsideTests,
-    ...mismatch
+    ...notes
   ];
   const notFromPr = [
     ...v.failingOnMain.slice(0, OPEN_FAILURE_LIMIT).map(
@@ -8033,17 +8047,77 @@ function failureCard(outcome, input2) {
 function change(input2) {
   return input2.links.pullRequest === null ? "push" : "PR";
 }
-function couldntRun(input2) {
-  const error = [input2.globalErrors.join("\n\n") || input2.stopped, input2.output].filter(Boolean).join("\n\n");
-  const appDidNotStart = /config\.webServer|webServer/.test(error);
+function couldNotStart(input2) {
+  return input2.stopped === null && input2.outcomes.length === 0 && input2.globalErrors.length > 0;
+}
+var BOBA_UNANSWERED = "Boba didn't answer this step, so nothing ran. That is Boba's failure, not your code's: re-run the job. Boba doesn't bill a run it broke; if this one shows on your bill, tell us and it is refunded.";
+var BOBA_BROKE_RUN = "Boba failed during this run, so its result may be incomplete. That is Boba's failure, not your code's. This run is free: Boba doesn't bill a run it broke. Re-run the job for a complete result.";
+var BOBA_FAULT_FREE = "This run is free: Boba doesn't bill a run it broke.";
+var BOBA_FAULT_NEXT = {
+  TIMED_OUT: "Boba stops a job at 60 minutes. Split the suite into Boba jobs that each finish within that, then push again.",
+  OUTSIDE_PULL_REQUEST: "Boba doesn't run pull requests from forks on this repository yet, so re-running won't change this. Its pushes and same-repository pull requests run as usual.",
+  RUNNER_OTHER_REPO: null,
+  RUNNER_OTHER_LANE: null,
+  RUNNER_OTHER_SCOPE: null,
+  AGENT_OUTDATED: null
+};
+function bobaFailed(input2) {
+  const error = [input2.globalErrors.join("\n\n"), input2.output].filter(Boolean).join("\n\n");
+  if (couldNotStart(input2)) {
+    const fix = missingVariableFix(error);
+    const title3 = "The app didn't start on Boba's machine";
+    return {
+      title: title3,
+      lines: [
+        `### \u26A0\uFE0F ${title3}`,
+        "",
+        "Nothing ran. Boba counts this as its own failure, since the saved runner it started from may be why, and drops that runner so the next run starts fresh.",
+        "",
+        BOBA_FAULT_FREE,
+        "",
+        "Re-run the job to run your tests.",
+        ...fix ? ["", `If it still doesn't start: ${fix}.`] : [],
+        "",
+        fold("The app's error", fence(truncate(error, 3e3), "")),
+        "",
+        `[Full log](${input2.links.runUrl})`
+      ]
+    };
+  }
+  const title2 = input2.code === "TIMED_OUT" ? "Boba stopped this job at its 60-minute limit" : "Boba failed, not your code";
+  const next = input2.code !== null && input2.code in BOBA_FAULT_NEXT ? BOBA_FAULT_NEXT[input2.code] : "Re-run the job to run your tests.";
+  return {
+    title: title2,
+    lines: [
+      `### \u26A0\uFE0F ${title2}`,
+      "",
+      `${(input2.stopped ?? "Boba failed").replace(/\.$/, "")}. This was Boba's failure, not your code's.`,
+      "",
+      BOBA_FAULT_FREE,
+      ...next ? ["", next] : [],
+      "",
+      `[Full log](${input2.links.runUrl})`
+    ]
+  };
+}
+function missingVariableFix(error) {
   const variable = /Missing (?:required )?environment variable:?\s+["'`]?([A-Z][A-Z0-9_]+)/i.exec(
     error
   )?.[1] ?? /\b([A-Z][A-Z0-9_]{2,}) (?:is not set|is required|is missing)/.exec(
     error
   )?.[1] ?? null;
+  return variable ? `Your app needs the environment variable ${code(variable)}. Add it to your repo's Actions secrets, then re-run` : null;
+}
+var STEP_SETTINGS_CODES = /* @__PURE__ */ new Set(["SETUP_NEEDED", "NO_TESTS"]);
+var STEP_SETTINGS_TITLE = "Nothing ran: check the Boba step's settings";
+function couldntRun(input2) {
+  const error = [input2.globalErrors.join("\n\n") || input2.stopped, input2.output].filter(Boolean).join("\n\n");
+  if (input2.code !== null && STEP_SETTINGS_CODES.has(input2.code))
+    return stepSettingsWrong(input2, error);
+  const appDidNotStart = /config\.webServer|webServer/.test(error);
   const limit = input2.timeLimitMinutes;
   const what = limit !== null ? timedOutLine(limit).replace(/\.$/, "") : appDidNotStart ? "The app didn't start, so nothing ran" : "Boba couldn't run your tests, so nothing ran";
-  const fix = variable ? `Your app needs the environment variable ${code(variable)}. Add it to your repo's Actions secrets, then re-run` : null;
+  const fix = missingVariableFix(error);
   const prompt = [
     `Boba couldn't run the Playwright tests of ${input2.links.repository}${input2.links.pullRequest ? ` pull request #${input2.links.pullRequest}` : ""} at commit ${short(input2.sha)}. ${what}. The error:`,
     "",
@@ -8061,6 +8135,29 @@ function couldntRun(input2) {
       "",
       fence(truncate(error || "No error was reported", 3e3), ""),
       ...fix ? ["", fix] : [],
+      "",
+      fold("\u{1F916} Prompt for AI agents", fence(prompt, "text")),
+      "",
+      `[Full log](${input2.links.runUrl})`
+    ]
+  };
+}
+function stepSettingsWrong(input2, error) {
+  const prompt = [
+    `The Playwright tests of ${input2.links.repository}${input2.links.pullRequest ? ` pull request #${input2.links.pullRequest}` : ""} at commit ${short(input2.sha)} didn't run: the settings of its Boba step don't pick a suite with tests. The error:`,
+    "",
+    truncate(error, 3e3),
+    "",
+    "Fix the `coldteadotai/boba` step in the workflow under .github/workflows/ (its `working-directory`, `config` and `project` inputs), not the test code. Then check that `npx playwright test --list`, run with the same settings, lists the tests"
+  ].join("\n");
+  return {
+    title: STEP_SETTINGS_TITLE,
+    lines: [
+      `### \u26A0\uFE0F ${STEP_SETTINGS_TITLE}`,
+      "",
+      `The Boba step's settings don't pick a suite with tests on ${short(input2.sha)}, so nothing ran.`,
+      "",
+      fence(truncate(error || "No error was reported", 3e3), ""),
       "",
       fold("\u{1F916} Prompt for AI agents", fence(prompt, "text")),
       "",
@@ -8145,7 +8242,9 @@ function bobaErrorLines(v) {
   return [
     "",
     `\u26A0\uFE0F ${v.bobaErrors.length === 1 ? "1 test" : `${v.bobaErrors.length} tests`} could not run, because of an error in Boba's machine, not in your code: ${shown.map((outcome) => code(title(outcome))).join(", ")}${more ? ` and ${more} more` : ""}`,
-    `> ${escapeMarkdown(truncate(describeFailure(v.bobaErrors[0].error).short, 300))}`
+    `> ${escapeMarkdown(truncate(describeFailure(v.bobaErrors[0].error).short, 300))}`,
+    "",
+    `${BOBA_FAULT_FREE} Re-run the job to run ${v.bobaErrors.length === 1 ? "that test" : "those tests"}.`
   ];
 }
 function brokenWhy(history, broken) {
@@ -8544,6 +8643,18 @@ function pullRequestNumber(eventPath) {
   }
   return null;
 }
+function pullRequestHead(eventPath) {
+  if (!eventPath) return null;
+  try {
+    const event = JSON.parse(readFileSync2(eventPath, "utf8"));
+    if (typeof event === "object" && event !== null && "pull_request" in event && typeof event.pull_request === "object" && event.pull_request !== null && "head" in event.pull_request && typeof event.pull_request.head === "object" && event.pull_request.head !== null && "sha" in event.pull_request.head && typeof event.pull_request.head.sha === "string") {
+      return event.pull_request.head.sha;
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
 function findMarkedComment(comments) {
   return comments.find((comment) => comment.body?.includes(COMMENT_MARKER))?.id ?? null;
 }
@@ -8628,6 +8739,14 @@ function list(value) {
 function assertNever2(value) {
   throw new Error(`Unhandled value: ${String(value)}`);
 }
+function ranElsewhere(jobId, job, github) {
+  const here = `${github.repository}@${github.sha}`;
+  if (job.repo?.toLowerCase() !== github.repository.toLowerCase())
+    return `Boba job ${jobId} ran ${job.repo ? "another repository" : "an unknown repository"}, not ${here}`;
+  if (job.sha !== github.sha)
+    return `Boba job ${jobId} ran ${github.repository}@${job.sha ?? "an unknown commit"}, not ${here}`;
+  return null;
+}
 
 // src/api.ts
 var RETRY_MS = 2e3;
@@ -8638,6 +8757,13 @@ var READ_TIMEOUT_MS = 3e4;
 var ODD_ANSWER_LIMIT_MS = 6e4;
 var RETRIED_STATUSES = /* @__PURE__ */ new Set([429, 502, 503, 504]);
 var RETRIED_READ_STATUSES = /* @__PURE__ */ new Set([520, 521, 522, 523, 524]);
+function brokeByBoba(job) {
+  return job.fault === "boba" && job.faultReason !== "NO_VERDICT";
+}
+var BobaUnanswered = class extends Error {
+};
+var NoAnswer = class extends Error {
+};
 var BobaApi = class {
   /** `token` is null off Boba's runners; Boba then refuses the step and says why. */
   constructor(baseUrl, token) {
@@ -8646,7 +8772,11 @@ var BobaApi = class {
   }
   async createJob(request) {
     const body = record(
-      await this.call("POST", "/api/boba/jobs", JSON.stringify(request))
+      await this.call("POST", "/api/boba/jobs", JSON.stringify(request)).catch(
+        (error) => {
+          throw error instanceof NoAnswer ? new BobaUnanswered(error.message) : error;
+        }
+      )
     );
     if (typeof body.jobId !== "string") {
       throw new Error("Boba accepted the job but returned no job id");
@@ -8673,7 +8803,11 @@ var BobaApi = class {
       code: typeof body.code === "string" ? body.code : null,
       firstRun: body.firstRun === true,
       suitePassed: body.suitePassed === true,
-      stoppedEarly: body.stoppedEarly === true && typeof body.testsNotRun === "number" && typeof body.testCount === "number" ? { notRun: body.testsNotRun, total: body.testCount } : null
+      stoppedEarly: body.stoppedEarly === true && typeof body.testsNotRun === "number" && typeof body.testCount === "number" ? { notRun: body.testsNotRun, total: body.testCount } : null,
+      maskedValues: typeof body.maskedValues === "number" ? body.maskedValues : 0,
+      namesWithheld: body.namesWithheld === true,
+      fault: body.fault === "boba" || body.fault === "customer" ? body.fault : null,
+      faultReason: typeof body.faultReason === "string" ? body.faultReason : null
     };
   }
   async reportToGitHub(jobId, report) {
@@ -8742,7 +8876,7 @@ var BobaApi = class {
     const body = record(
       await this.call(
         "GET",
-        `/api/boba/jobs/${encodeURIComponent(jobId)}/history${query.size ? `?${query}` : ""}`,
+        `/api/boba/jobs/${encodeURIComponent(jobId)}/history${query.size ? `?${query.toString()}` : ""}`,
         void 0,
         signal
       )
@@ -8796,6 +8930,10 @@ var BobaApi = class {
       }
       if (!response.ok) {
         const message = readMessage(parsed);
+        if (response.status >= 500)
+          throw new NoAnswer(
+            `Boba ${method} ${path} answered ${response.status}: ${(message ?? text ?? "").slice(0, 500)}`
+          );
         throw new Error(
           message && (response.status === 401 || response.status === 403) ? `Boba refused this step: ${message}` : `Boba ${method} ${path} answered ${response.status}: ${(message ?? text ?? "").slice(0, 500)}`
         );
@@ -8829,7 +8967,10 @@ var BobaApi = class {
           ...timeout ? { signal: timeout } : {}
         });
       } catch (error) {
-        if (method !== "GET" || Date.now() > giveUpAt) throw error;
+        if (method !== "GET" || Date.now() > giveUpAt)
+          throw new NoAnswer(
+            `Boba ${method} ${path} got no answer: ${error instanceof Error ? error.message : String(error)}`
+          );
         console.log(
           `Boba GET ${path} failed (${error instanceof Error ? error.message : String(error)}); trying again`
         );
@@ -9012,6 +9153,7 @@ async function main() {
     token: githubToken,
     repository: required("GITHUB_REPOSITORY"),
     sha: required("GITHUB_SHA"),
+    headSha: pullRequestHead(process.env.GITHUB_EVENT_PATH) ?? required("GITHUB_SHA"),
     runId: required("GITHUB_RUN_ID"),
     runAttempt: process.env.GITHUB_RUN_ATTEMPT || "1",
     runnerName: process.env.RUNNER_NAME || null
@@ -9097,7 +9239,7 @@ async function main() {
     );
   }).catch(
     (error) => console.log(
-      `::warning::Boba could not read earlier results, so every failure counts as this PR's: ${error instanceof Error ? error.message : String(error)}`
+      `::warning::${historyUnreadLine(error instanceof Error ? error.message : String(error))}`
     )
   );
   const checkName = input("check-name", "Boba");
@@ -9113,11 +9255,8 @@ async function main() {
   };
   const { job, timedOut } = await api.waitForJob(jobId, deadline, showProgress);
   stopProgress.abort();
-  if (job.repo?.toLowerCase() !== github.repository.toLowerCase() || job.sha !== github.sha) {
-    throw new Error(
-      `Boba job ${jobId} ran ${job.repo ?? "an unknown repository"}@${job.sha ?? "an unknown commit"}, not ${github.repository}@${github.sha}`
-    );
-  }
+  const elsewhere = ranElsewhere(jobId, job, github);
+  if (elsewhere) throw new Error(elsewhere);
   const { built, outcomes, ran } = await resultOf({
     api,
     job,
@@ -9129,9 +9268,7 @@ async function main() {
     history: () => {
       if (!history) {
         stopHistory.abort();
-        console.log(
-          "::warning::Earlier results were not back when the tests ended, so every failure counts as this PR's"
-        );
+        console.log(`::warning::${HISTORY_LATE_LINE}`);
       }
       return history;
     }
@@ -9203,7 +9340,7 @@ async function resultOf(input2) {
   );
   const history = input2.history();
   const built = buildReport({
-    sha: github.sha,
+    sha: github.headSha,
     outcomes,
     wallMs: job.wallMs,
     history: history ?? NO_HISTORY,
@@ -9224,7 +9361,11 @@ async function resultOf(input2) {
     // Boba's own limit is 60 minutes; the step's is its timeout-minutes.
     timeLimitMinutes: timedOut ? input2.waitMinutes : !ran && job.code === "TIMED_OUT" ? 60 : null,
     suitePassed: job.suitePassed,
-    stoppedEarly: ran ? job.stoppedEarly : null
+    stoppedEarly: ran ? job.stoppedEarly : null,
+    maskedValues: ran ? job.maskedValues : 0,
+    namesWithheld: ran && job.namesWithheld,
+    bobaFault: brokeByBoba(job),
+    code: job.code
   });
   return { built, outcomes, ran };
 }
@@ -9307,10 +9448,8 @@ async function runSuites(run) {
     const results = [];
     for (const [index, entry] of jobs.entries()) {
       const { job, timedOut } = await entry.waited;
-      if (job.repo?.toLowerCase() !== github.repository.toLowerCase() || job.sha !== github.sha)
-        throw new Error(
-          `Boba job ${entry.jobId} ran ${job.repo ?? "an unknown repository"}@${job.sha ?? "an unknown commit"}, not ${github.repository}@${github.sha}`
-        );
+      const elsewhere = ranElsewhere(entry.jobId, job, github);
+      if (elsewhere) throw new Error(elsewhere);
       const result = await resultOf({
         api,
         job,
@@ -9394,5 +9533,7 @@ main().catch((error) => {
   console.log(
     `::error::${error instanceof Error ? error.message : String(error)}`
   );
+  if (error instanceof BobaUnanswered)
+    console.log(`::error::${BOBA_UNANSWERED}`);
   process.exitCode = 1;
 });
