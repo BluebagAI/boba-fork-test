@@ -13,7 +13,8 @@ on:
 
 jobs:
   ci:
-    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'coldtea-boba-outside' || 'coldtea-boba' }}
+    # A fork asking for the team's runner (COL-1616 proof): it must never boot the team's saved VM.
+    runs-on: coldtea-boba
     strategy:
       matrix:
         node-version: [22]
